@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import LowStockSetting from '../models/LowStockSetting.js';
+import LowStockSetting from '../models/lowStockSetting.js';
 
 const router = Router();
 
