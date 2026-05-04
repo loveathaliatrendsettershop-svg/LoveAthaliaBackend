@@ -89,8 +89,13 @@ export const loginUser = async (req, res) => {
 
     const log = await UserLog.create({ user: user._id, timeIn: new Date() });
 
-    user.lastActive = new Date();
-    await user.save();
+    // ✅ Wrap in try/catch so it doesn't crash login
+    try {
+      user.lastActive = new Date();
+      await user.save();
+    } catch (saveErr) {
+      console.warn('Could not update lastActive:', saveErr.message);
+    }
 
     res.status(200).json({
       message: "Time In recorded", log, user: {
@@ -128,8 +133,13 @@ export const logoutUser = async (req, res) => {
     log.timeOut = new Date();
     await log.save();
 
-    user.lastActive = new Date();
-    await user.save();
+    // ✅ Wrap in try/catch so it doesn't crash logout
+    try {
+      user.lastActive = new Date();
+      await user.save();
+    } catch (saveErr) {
+      console.warn('Could not update lastActive:', saveErr.message);
+    }
 
     res.status(200).json({ message: "Time Out recorded", log });
   } catch (error) {
