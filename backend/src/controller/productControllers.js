@@ -3,15 +3,14 @@ import Product from "../models/product.js";
 // ==========================
 // GET ALL PRODUCTS
 // ==========================
-// ✅ Get all products (active only by default)
 export const getProducts = async (req, res) => {
   try {
     const showAll = req.query.showAll === 'true';
     const filter  = showAll ? {} : { isActive: true };
     const products = await Product.find(filter)
-    .populate('size', 'name')
-    .populate('set', 'name')
-    .sort({ createdAt: -1 });
+      .populate('size', '_id name')
+      .populate('set', '_id name')
+      .sort({ createdAt: -1 });
     res.status(200).json(products);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -53,11 +52,10 @@ export const createProduct = async (req, res) => {
       stock
     });
 
-    // populate size and set before sending response
     await product.populate([
-  { path: "size", select: "name slug" },
-  { path: "set", select: "name slug" }
-]);
+      { path: "size", select: "_id name slug" },
+      { path: "set",  select: "_id name slug" }
+    ]);
 
     res.status(201).json(product);
   } catch (error) {
@@ -101,8 +99,8 @@ export const updateProduct = async (req, res) => {
       },
       { new: true, runValidators: true }
     )
-      .populate("size", "name slug")
-      .populate("set", "name slug");
+      .populate("size", "_id name slug")
+      .populate("set",  "_id name slug");
 
     if (!updatedProduct)
       return res.status(404).json({ message: "Product not found" });
@@ -113,32 +111,31 @@ export const updateProduct = async (req, res) => {
   }
 };
 
+// ==========================
 // GET TOP 3 BEST SELLERS
+// ==========================
 export const getBestSellers = async (req, res) => {
   try {
     const products = await Product.find({ isActive: true })
-      .populate("size", "name")
-      .populate("set", "name")
+      .populate("size", "_id name")
+      .populate("set",  "_id name")
       .sort({ totalSold: -1 })
       .limit(3);
-
     res.status(200).json(products);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
+
 // ==========================
-// DELETE PRODUCT
+// TOGGLE PRODUCT STATUS
 // ==========================
-// ✅ Toggle product active/inactive (replaces delete)
 export const toggleProductStatus = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
     if (!product) return res.status(404).json({ message: 'Product not found' });
-
     product.isActive = !product.isActive;
     await product.save();
-
     res.json({ message: `Product marked as ${product.isActive ? 'active' : 'inactive'}`, product });
   } catch (error) {
     res.status(500).json({ message: error.message });
