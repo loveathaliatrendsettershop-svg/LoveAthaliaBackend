@@ -37,7 +37,9 @@ const productSchema = new mongoose.Schema({
   ],
 
   slot: Number,
-
+  packsPerSlot: {        // ← ADD THIS
+    type: Number,
+  },
   quantityPerPack: {
     type: Number,
     required: true
