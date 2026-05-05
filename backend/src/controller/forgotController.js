@@ -1,16 +1,17 @@
 import User from "../models/user.js";
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 
 // Store PINs temporarily (in production use Redis or DB)
 const pinStore = {};
 const passwordRegex = /^(?=.*[A-Z])(?=.*\d).{8,}$/;
+const resend = new Resend(process.env.RESEND_API_KEY);
+
 // ==========================
 // Send PIN to email
 // ==========================
 export const sendPin = async (req, res) => {
   try {
     const { email } = req.body;
-
     const user = await User.findOne({ email });
     if (!user)
       return res.status(400).json({ message: "Email not found" });
@@ -25,16 +26,8 @@ export const sendPin = async (req, res) => {
     };
 
     // Send email
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.EMAIL_USER, // ✅
-        pass: process.env.EMAIL_PASS, // ✅
-      },
-    });
-
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER,
+    await resend.emails.send({
+      from: "onboarding@resend.dev",
       to: email,
       subject: "Your Password Reset PIN",
       text: `Your PIN is: ${pin}. It expires in 10 minutes.`,
@@ -53,17 +46,13 @@ export const sendPin = async (req, res) => {
 export const verifyPin = async (req, res) => {
   try {
     const { email, pin } = req.body;
-
     const record = pinStore[email];
     if (!record)
       return res.status(400).json({ message: "No PIN found for this email" });
-
     if (Date.now() > record.expiresAt)
       return res.status(400).json({ message: "PIN has expired" });
-
     if (record.pin !== pin)
       return res.status(400).json({ message: "Incorrect PIN" });
-
     res.status(200).json({ message: "PIN verified" });
   } catch (error) {
     console.error(error);
@@ -77,7 +66,6 @@ export const verifyPin = async (req, res) => {
 export const resetPassword = async (req, res) => {
   try {
     const { email, pin, newPassword } = req.body;
-
     const record = pinStore[email];
     if (!record || record.pin !== pin)
       return res.status(400).json({ message: "Invalid or expired PIN" });
@@ -86,13 +74,10 @@ export const resetPassword = async (req, res) => {
     if (!user)
       return res.status(400).json({ message: "User not found" });
 
-    // ==========================
-    // PASSWORD VALIDATION ADDED
-    // ==========================
     if (!newPassword || !passwordRegex.test(newPassword)) {
       return res.status(400).json({
         message:
-          "Password must be at least 8 characters long, include 1 uppercase letter and 1 number"
+          "Password must be at least 8 characters long, include 1 uppercase letter and 1 number",
       });
     }
 
@@ -104,7 +89,6 @@ export const resetPassword = async (req, res) => {
 
     // Clear PIN after use
     delete pinStore[email];
-
     res.status(200).json({ message: "Password reset successful" });
   } catch (error) {
     console.error(error);
