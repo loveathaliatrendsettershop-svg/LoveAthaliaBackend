@@ -1,4 +1,3 @@
-// controllers/order.js
 import Order from "../models/order.js";
 import Product from "../models/product.js";
 
@@ -42,15 +41,15 @@ export const createOrder = async (req, res) => {
       subTotal += price * item.quantity;
 
       orderItems.push({
-        product: product._id,
-        name: product.name,
+        product:  product._id,
+        name:     product.name,
         price,
         quantity: item.quantity,
       });
     }
 
-    const paymentStatus = paymentMethod === "cash" ? "Paid" : "Pending";
-    const status = paymentMethod === "cash" ? "To Ship" : "Reserved";
+    const paymentStatus = paymentMethod === "cash" ? "Paid"     : "Pending";
+    const status        = paymentMethod === "cash" ? "To Ship"  : "Reserved";
 
     const order = await Order.create({
       nameTobill,
@@ -61,15 +60,21 @@ export const createOrder = async (req, res) => {
       status,
     });
 
-    // ⭐ IF CASH — deduct stock AND add to totalSold
-    if (paymentMethod === "cash") {
-      for (const item of order.products) {
-        const product = await Product.findById(item.product);
+    // Deduct slot by 1 per product, deduct stock + totalSold for cash only
+    for (const item of order.products) {
+      const product = await Product.findById(item.product);
+      if (!product) continue;
 
-        product.stock -= item.quantity;
-        product.totalSold += item.quantity; // ⭐⭐⭐ HERE
-        await product.save();
+      // Always deduct 1 slot per product on order placement
+      product.slot = Math.max(0, (product.slot || 0) - 1);
+
+      // Only deduct stock and totalSold for cash payment
+      if (paymentMethod === "cash") {
+        product.stock      -= item.quantity;
+        product.totalSold  += item.quantity;
       }
+
+      await product.save();
     }
 
     res.status(201).json(order);
@@ -98,14 +103,15 @@ export const submitPaymentReference = async (req, res) => {
       if (product.stock < item.quantity)
         return res.status(400).json({ message: `${product.name} out of stock now` });
 
-      product.stock -= item.quantity;
-      product.totalSold += item.quantity; // ⭐⭐⭐ HERE
+      // Slot already deducted at order creation — only deduct stock + totalSold here
+      product.stock     -= item.quantity;
+      product.totalSold += item.quantity;
       await product.save();
     }
 
     order.paymentReference = reference;
-    order.paymentStatus = "Paid";
-    order.status = "To Ship";
+    order.paymentStatus    = "Paid";
+    order.status           = "To Ship";
 
     await order.save();
 
@@ -123,6 +129,38 @@ export const updateOrderStatus = async (req, res) => {
     const order = await Order.findById(req.params.id);
     if (!order) return res.status(404).json({ message: "Order not found" });
 
+    const wasCancelled = order.status === "Cancelled";
+    const isCancelling = status === "Cancelled";
+
+    // Transitioning TO cancelled → restore 1 slot per product
+    if (!wasCancelled && isCancelling) {
+      for (const item of order.products) {
+        const product = await Product.findById(item.product);
+        if (product) {
+          product.slot = (product.slot || 0) + 1;
+
+          // Also restore stock + totalSold if order was already paid
+          if (order.paymentStatus === "Paid") {
+            product.stock     += item.quantity;
+            product.totalSold  = Math.max(0, product.totalSold - item.quantity);
+          }
+
+          await product.save();
+        }
+      }
+    }
+
+    // Un-cancelling → re-deduct 1 slot per product
+    if (wasCancelled && !isCancelling) {
+      for (const item of order.products) {
+        const product = await Product.findById(item.product);
+        if (product) {
+          product.slot = Math.max(0, (product.slot || 0) - 1);
+          await product.save();
+        }
+      }
+    }
+
     order.status = status;
     await order.save();
 
@@ -132,33 +170,41 @@ export const updateOrderStatus = async (req, res) => {
   }
 };
 
+// UPDATE SHIPMENT DETAILS
 export const updateShipmentDetails = async (req, res) => {
   try {
     const { shipmentMethod, courier } = req.body;
     const order = await Order.findById(req.params.id);
-    if (!order) return res.status(404).json({ message: 'Order not found' });
+    if (!order) return res.status(404).json({ message: "Order not found" });
     if (shipmentMethod !== undefined) order.shipmentMethod = shipmentMethod;
-    if (courier !== undefined)        order.courier        = courier;
+    if (courier        !== undefined) order.courier        = courier;
     await order.save();
     res.json(order);
-  } catch (error) { res.status(500).json({ message: error.message }); }
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
 };
 
-// DELETE ORDER (restore stock AND totalSold if paid)
+// DELETE ORDER (restore slot always, restore stock + totalSold if paid)
 export const deleteOrder = async (req, res) => {
   try {
     const order = await Order.findById(req.params.id);
     if (!order)
       return res.status(404).json({ message: "Order not found" });
 
-    if (order.paymentStatus === "Paid") {
-      for (const item of order.products) {
-        const product = await Product.findById(item.product);
-        if (product) {
-          product.stock += item.quantity;
-          product.totalSold -= item.quantity; // ⭐⭐⭐ VERY IMPORTANT
-          await product.save();
+    for (const item of order.products) {
+      const product = await Product.findById(item.product);
+      if (product) {
+        // Always restore 1 slot on delete
+        product.slot = (product.slot || 0) + 1;
+
+        // Only restore stock + totalSold if order was paid
+        if (order.paymentStatus === "Paid") {
+          product.stock     += item.quantity;
+          product.totalSold  = Math.max(0, product.totalSold - item.quantity);
         }
+
+        await product.save();
       }
     }
 
